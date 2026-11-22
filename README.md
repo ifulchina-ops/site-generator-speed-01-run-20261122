@@ -10,7 +10,7 @@ A faster drop-in for [makefun-site 1.0.0](https://make.fun/c/site-generator-spee
 
 Verified locally on the kit's practice set (3/3 cases identical to the oracle) and on seven further generated sets (21/21 cases identical), plus a hand-built edge-case site (front-matter refusals, slug collisions, Unicode titles, unclosed fences, deep includes, broken links — all identical). `grade-local --driver process` reproduces the practice result byte for byte (L1 regrade).
 
-Local speed (CPU time of `run()` over the 3 practice cases, median of 7 runs): ~0.20 s vs ~0.64 s for the house baseline — about a 3x speedup.
+Local speed (CPU time over the 3 practice cases, median of runs): `run()` ~0.19 s vs ~0.64 s for the house baseline — about a 3x speedup. Whole `main.ts` process: ~0.74 s vs ~1.25 s; net of the do-nothing control (~0.22 s) that is ~0.52 s vs ~1.03 s — under the live board's top-10 bar of 1,210,000 µs on like-for-like local hardware (the server's 1-CPU container will scale both sides).
 
 ## Usage
 

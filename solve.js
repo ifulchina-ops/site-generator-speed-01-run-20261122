@@ -370,10 +370,10 @@ function isContinued(line) {
 /** The characters a backslash escapes. */
 const ESCAPABLE = new Set(['\\', '`', '*', '_', '[', ']', '(', ')', '#', '+', '-', '.', '!', '>']);
 
-/** The first index from `from` where `s` holds `what` outside a backslash escape, or -1. */
-function findUnescaped(s, what, from) {
-  for (let j = from; j <= s.length - what.length; j++) {
-    if (s[j] === '\\' && j + 1 < s.length && ESCAPABLE.has(s[j + 1])) {
+/** The first index from `from` (below `hi`) where `s` holds `what` outside a backslash escape, or -1. */
+function findUnescaped(s, what, from, hi) {
+  for (let j = from; j <= hi - what.length; j++) {
+    if (s[j] === '\\' && j + 1 < hi && ESCAPABLE.has(s[j + 1])) {
       j++;
       continue;
     }
@@ -382,16 +382,16 @@ function findUnescaped(s, what, from) {
   return -1;
 }
 
-/** The first single * from `from` (one whose run is not **), outside an escape, or -1. */
-function findSingleStar(s, from) {
-  for (let j = from; j < s.length; j++) {
+/** The first single * from `from` (below `hi`, one whose run is not **), outside an escape, or -1. */
+function findSingleStar(s, from, hi) {
+  for (let j = from; j < hi; j++) {
     const c = s[j];
-    if (c === '\\' && j + 1 < s.length && ESCAPABLE.has(s[j + 1])) {
+    if (c === '\\' && j + 1 < hi && ESCAPABLE.has(s[j + 1])) {
       j++;
       continue;
     }
     if (c !== '*') continue;
-    if (s[j + 1] === '*') {
+    if (j + 1 < hi && s[j + 1] === '*') {
       j++;
       continue;
     }
@@ -401,21 +401,23 @@ function findSingleStar(s, from) {
 }
 
 /**
- * `s` rendered inline; `env.link(target)` is a link's href. Plain text is
- * carried pending and escaped in one slice per run, never one regex per char,
- * and the scan for the next construct is a native regex search, not a
- * per-character JavaScript loop.
+ * `s` rendered inline over the range [lo, hi); `env.link(target)` is a link's
+ * href. Plain text is carried pending and escaped in one slice per run, never
+ * one regex per char, and the scan for the next construct is a native regex
+ * search, not a per-character JavaScript loop. Nested constructs recurse on
+ * ranges of the same string, never on copies of it.
  */
-function inline(s, env) {
+function inline(s, env, lo = 0, hi = s.length) {
   const scan = /[\\`*\[]/g;
+  scan.lastIndex = lo;
   let out = '';
-  let last = 0;
+  let last = lo;
   let m;
-  while ((m = scan.exec(s)) !== null) {
+  while ((m = scan.exec(s)) !== null && m.index < hi) {
     const i = m.index;
     const c = s.charCodeAt(i);
     if (c === 92) {
-      if (i + 1 < s.length && ESCAPABLE.has(s[i + 1])) {
+      if (i + 1 < hi && ESCAPABLE.has(s[i + 1])) {
         if (i > last) out += escapeHtml(s.slice(last, i));
         out += escapeHtml(s[i + 1]);
         scan.lastIndex = i + 2;
@@ -425,7 +427,7 @@ function inline(s, env) {
     }
     if (c === 96) {
       const j = s.indexOf('`', i + 1);
-      if (j > i + 1) {
+      if (j !== -1 && j < hi && j > i + 1) {
         if (i > last) out += escapeHtml(s.slice(last, i));
         out += `<code>${escapeHtml(s.slice(i + 1, j))}</code>`;
         scan.lastIndex = j + 1;
@@ -434,36 +436,36 @@ function inline(s, env) {
       continue;
     }
     if (c === 42) {
-      if (s.charCodeAt(i + 1) === 42) {
-        const j = findUnescaped(s, '**', i + 2);
+      if (i + 1 < hi && s.charCodeAt(i + 1) === 42) {
+        const j = findUnescaped(s, '**', i + 2, hi);
         if (j > i + 2) {
           if (i > last) out += escapeHtml(s.slice(last, i));
-          out += `<strong>${inline(s.slice(i + 2, j), env)}</strong>`;
+          out += `<strong>${inline(s, env, i + 2, j)}</strong>`;
           scan.lastIndex = j + 2;
           last = j + 2;
         } else scan.lastIndex = i + 2;
         continue;
       }
-      const j = findSingleStar(s, i + 1);
+      const j = findSingleStar(s, i + 1, hi);
       if (j > i + 1) {
         if (i > last) out += escapeHtml(s.slice(last, i));
-        out += `<em>${inline(s.slice(i + 1, j), env)}</em>`;
+        out += `<em>${inline(s, env, i + 1, j)}</em>`;
         scan.lastIndex = j + 1;
         last = j + 1;
       } else scan.lastIndex = i + 1;
       continue;
     }
-    const k = findUnescaped(s, ']', i + 1);
-    const mm = k !== -1 && s.charCodeAt(k + 1) === 40 ? s.indexOf(')', k + 2) : -1;
-    const target = mm === -1 ? '' : s.slice(k + 2, mm);
+    const k = findUnescaped(s, ']', i + 1, hi);
+    const mm = k !== -1 && k + 1 < hi && s.charCodeAt(k + 1) === 40 ? s.indexOf(')', k + 2) : -1;
+    const target = mm !== -1 && mm < hi ? s.slice(k + 2, mm) : '';
     if (target !== '' && !/\s/.test(target)) {
       if (i > last) out += escapeHtml(s.slice(last, i));
-      out += `<a href="${escapeHtml(env.link(target))}">${inline(s.slice(i + 1, k), env)}</a>`;
+      out += `<a href="${escapeHtml(env.link(target))}">${inline(s, env, i + 1, k)}</a>`;
       scan.lastIndex = mm + 1;
       last = mm + 1;
     } else scan.lastIndex = i + 1;
   }
-  if (s.length > last) out += escapeHtml(s.slice(last));
+  if (hi > last) out += escapeHtml(s.slice(last, hi));
   return out;
 }
 
@@ -570,7 +572,7 @@ function renderMarkdown(src, env) {
     if (excerpt === null) excerpt = html;
     blocks.push(`<p>${html}</p>`);
   }
-  return { html: blocks.length === 0 ? '' : blocks.map((x) => `${x}\n`).join(''), toc, excerpt: excerpt ?? '' };
+  return { html: blocks.length === 0 ? '' : `${blocks.join('\n')}\n`, toc, excerpt: excerpt ?? '' };
 }
 
 // ---------------------------------------------------------------- templates
@@ -716,23 +718,32 @@ function renderNodes(nodes, scope, templates, depth, out) {
       case 'text':
         out.push(n.text);
         break;
-      case 'var':
-        out.push(escapeHtml(textOf(lookup(scope, n.path))));
+      case 'var': {
+        const v = lookup(scope, n.path);
+        out.push(escapeHtml(typeof v === 'string' ? v : textOf(v)));
         break;
-      case 'raw':
-        out.push(textOf(lookup(scope, n.path)));
+      }
+      case 'raw': {
+        const v = lookup(scope, n.path);
+        out.push(typeof v === 'string' ? v : textOf(v));
         break;
+      }
       case 'if': {
-        const v = truthy(lookup(scope, n.path));
-        const branch = v !== n.not ? n.then : n.else;
+        const v = lookup(scope, n.path);
+        const t = Array.isArray(v) ? v.length > 0 : v !== undefined && v !== null && v !== false && v !== '' && v !== 0;
+        const branch = t !== n.not ? n.then : n.else;
         if (branch !== null) renderNodes(branch, scope, templates, depth, out);
         break;
       }
       case 'for': {
         const xs = lookup(scope, n.path);
         if (!Array.isArray(xs)) break;
+        const loop = { index: 0, first: false, last: false, length: xs.length };
         for (let k = 0; k < xs.length; k++) {
-          const vars = { [n.name]: xs[k], loop: { index: k + 1, first: k === 0, last: k === xs.length - 1, length: xs.length } };
+          loop.index = k + 1;
+          loop.first = k === 0;
+          loop.last = k === xs.length - 1;
+          const vars = { [n.name]: xs[k], loop };
           renderNodes(n.body, { vars, parent: scope }, templates, depth, out);
         }
         break;
